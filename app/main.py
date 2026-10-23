@@ -5,6 +5,8 @@ from fastapi import FastAPI, File, HTTPException, UploadFile
 from pypdf import PdfReader
 from pypdf.errors import PdfReadError
 
+from app.chunking import chunk_text
+
 app = FastAPI(title="Production-Grade RAG API")
 
 @app.get("/health")
@@ -32,16 +34,29 @@ async def extract_pdf(file: UploadFile = File(...)):
             detail="Encrypted PDFs are not supported yet."
         )
 
-    pages = [
-        {
-            "page_number": page_number,
-            "text": page.extract_text() or ""
-        }
-        for page_number, page in enumerate(reader.pages, start=1)
-    ]
+    pages = []
+
+    for page_number, page in enumerate(reader.pages, start=1):
+        text = page.extract_text() or ""
+        chunks = chunk_text(text)
+
+        pages.append(
+            {
+                "page_number": page_number,
+                "text": text,
+                "chunks": [
+                    {
+                        "chunk_index": chunk_index,
+                        "text": chunk,
+                    }
+                    for chunk_index, chunk in enumerate(chunks, start=1)
+                ],
+            }
+        )
 
     return {
-        "filename": file.filename, 
-        "page_count": len(pages), 
-        "pages": pages
+        "filename": file.filename,
+        "page_count": len(pages),
+        "chunk_count": sum(len(page["chunks"]) for page in pages),
+        "pages": pages,
     }
