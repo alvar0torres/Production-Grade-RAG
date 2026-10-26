@@ -4,14 +4,27 @@ from pathlib import Path
 from fastapi import FastAPI, File, HTTPException, UploadFile
 from pypdf import PdfReader
 from pypdf.errors import PdfReadError
+from pydantic import BaseModel, Field
 
 from app.chunking import chunk_text
+from app.embeddings import create_embedding
+
+class EmbeddingRequest(BaseModel):
+    text: str = Field(min_length=1)
 
 app = FastAPI(title="Production-Grade RAG API")
 
 @app.get("/health")
 def health_check():
     return {"status": "ok"}
+
+@app.post("/embeddings")
+async def create_embedding_endpoint(request: EmbeddingRequest):
+    embedding = await create_embedding(request.text)
+    return {
+        "dimensions": len(embedding), 
+        "preview": embedding[:5]
+    }
 
 @app.post("/documents/extract")
 async def extract_pdf(file: UploadFile = File(...)):
