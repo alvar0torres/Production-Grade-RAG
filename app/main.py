@@ -7,24 +7,31 @@ from pypdf.errors import PdfReadError
 from pydantic import BaseModel, Field
 
 from app.chunking import chunk_text
-from app.embeddings import create_embedding
+from app.embeddings import create_embeddings
+
 
 class EmbeddingRequest(BaseModel):
-    text: str = Field(min_length=1)
+    texts: list[str] = Field(min_length=1, max_length=100)
+
 
 app = FastAPI(title="Production-Grade RAG API")
+
 
 @app.get("/health")
 def health_check():
     return {"status": "ok"}
 
+
 @app.post("/embeddings")
 async def create_embedding_endpoint(request: EmbeddingRequest):
-    embedding = await create_embedding(request.text)
+    embeddings = await create_embeddings(request.texts)
+
     return {
-        "dimensions": len(embedding), 
-        "preview": embedding[:5]
+        "embedding_count": len(embeddings),
+        "dimensions": len(embeddings[0]),
+        "previews": [embedding[:5] for embedding in embeddings],
     }
+
 
 @app.post("/documents/extract")
 async def extract_pdf(file: UploadFile = File(...)):
@@ -37,14 +44,12 @@ async def extract_pdf(file: UploadFile = File(...)):
         reader = PdfReader(BytesIO(contents))
     except PdfReadError as error:
         raise HTTPException(
-            status_code=400,
-            detail="The uploaded file could not be read as a PDF."
+            status_code=400, detail="The uploaded file could not be read as a PDF."
         ) from error
 
     if reader.is_encrypted:
         raise HTTPException(
-            status_code=400,
-            detail="Encrypted PDFs are not supported yet."
+            status_code=400, detail="Encrypted PDFs are not supported yet."
         )
 
     pages = []

@@ -5,9 +5,17 @@ load_dotenv()
 
 client = AsyncOpenAI()
 
-async def create_embedding(text: str) -> list[float]:
+
+async def create_embeddings(texts: list[str]) -> list[list[float]]:
+    if not texts:
+        return []
+
     response = await client.embeddings.create(
         model="text-embedding-3-small",
-        input=text,
+        input=texts,
     )
-    return response.data[0].embedding
+
+    # Match each returned vector to the corresponding input position.
+    return [
+        item.embedding for item in sorted(response.data, key=lambda item: item.index)
+    ]
