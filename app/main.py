@@ -8,6 +8,18 @@ from pydantic import BaseModel, Field
 
 from app.chunking import chunk_text
 from app.embeddings import create_embeddings
+from app.vector_store import store_chunks
+
+
+class ChunkInput(BaseModel):
+    text: str = Field(min_length=1)
+    file_name: str = Field(min_length=1)
+    page_number: int = Field(ge=1)
+    chunk_index: int = Field(ge=1)
+
+
+class IndexChunksRequest(BaseModel):
+    chunks: list[ChunkInput] = Field(min_length=1, max_length=100)
 
 
 class EmbeddingRequest(BaseModel):
@@ -78,3 +90,14 @@ async def extract_pdf(file: UploadFile = File(...)):
         "chunk_count": sum(len(page["chunks"]) for page in pages),
         "pages": pages,
     }
+
+
+@app.post("/documents/index")
+async def index_chunks(request: IndexChunksRequest):
+    chunks = [chunk.model_dump() for chunk in request.chunks]
+    texts = [chunk["text"] for chunk in chunks]
+
+    embeddings = await create_embeddings(texts)
+    store_chunks(chunks, embeddings)
+
+    return {"indexed_count": len(chunks)}
