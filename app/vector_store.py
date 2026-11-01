@@ -35,3 +35,17 @@ def store_chunks(
     ]
 
     client.upsert(collection_name=COLLECTION_NAME, points=points)
+
+
+def search_chunks(
+    embedding: list[float],
+    limit: int = 5,
+) -> list[models.ScoredPoint]:
+    response = client.query_points(
+        collection_name=COLLECTION_NAME,
+        query=embedding,
+        limit=limit,
+        with_payload=True,
+    )
+
+    return response.points

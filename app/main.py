@@ -8,7 +8,7 @@ from pydantic import BaseModel, Field
 
 from app.chunking import chunk_text
 from app.embeddings import create_embeddings
-from app.vector_store import store_chunks
+from app.vector_store import search_chunks, store_chunks
 
 
 class ChunkInput(BaseModel):
@@ -24,6 +24,11 @@ class IndexChunksRequest(BaseModel):
 
 class EmbeddingRequest(BaseModel):
     texts: list[str] = Field(min_length=1, max_length=100)
+
+
+class SearchRequest(BaseModel):
+    question: str = Field(min_length=1)
+    limit: int = Field(default=5, ge=1, le=10)
 
 
 app = FastAPI(title="Production-Grade RAG API")
@@ -101,3 +106,26 @@ async def index_chunks(request: IndexChunksRequest):
     store_chunks(chunks, embeddings)
 
     return {"indexed_count": len(chunks)}
+
+
+@app.post("/search")
+async def search(request: SearchRequest):
+    embeddings = await create_embeddings([request.question])
+    results = search_chunks(embeddings[0], limit=request.limit)
+
+    return {
+        "question": request.question,
+        "results": [
+            {
+                "score": result.score,
+                "text": result.payload.get("text") if result.payload else None,
+                "file_name": (
+                    result.payload.get("file_name") if result.payload else None
+                ),
+                "page_number": (
+                    result.payload.get("page_number") if result.payload else None
+                ),
+            }
+            for result in results
+        ],
+    }
