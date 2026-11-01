@@ -4,32 +4,19 @@ from pathlib import Path
 from fastapi import FastAPI, File, HTTPException, UploadFile
 from pypdf import PdfReader
 from pypdf.errors import PdfReadError
-from pydantic import BaseModel, Field
 
 from app.chunking import chunk_text
 from app.embeddings import create_embeddings
+from app.generation import generate_answer
 from app.vector_store import search_chunks, store_chunks
-
-
-class ChunkInput(BaseModel):
-    text: str = Field(min_length=1)
-    file_name: str = Field(min_length=1)
-    page_number: int = Field(ge=1)
-    chunk_index: int = Field(ge=1)
-
-
-class IndexChunksRequest(BaseModel):
-    chunks: list[ChunkInput] = Field(min_length=1, max_length=100)
-
-
-class EmbeddingRequest(BaseModel):
-    texts: list[str] = Field(min_length=1, max_length=100)
-
-
-class SearchRequest(BaseModel):
-    question: str = Field(min_length=1)
-    limit: int = Field(default=5, ge=1, le=10)
-
+from app.schemas import (
+    AskRequest,
+    AskResponse,
+    Citation,
+    EmbeddingRequest,
+    IndexChunksRequest,
+    SearchRequest,
+)
 
 app = FastAPI(title="Production-Grade RAG API")
 
@@ -129,3 +116,38 @@ async def search(request: SearchRequest):
             for result in results
         ],
     }
+
+
+@app.post("/ask", response_model=AskResponse)
+async def ask(request: AskRequest):
+    question_embedding = (await create_embeddings([request.question]))[0]
+    results = search_chunks(question_embedding, limit=request.limit)
+
+    sources = [result.payload for result in results if result.payload is not None]
+
+    generated = await generate_answer(request.question, sources)
+
+    # Map the model's source IDs back to retrieved chunks.
+    sources_by_id = {
+        f"S{index}": source for index, source in enumerate(sources, start=1)
+    }
+
+    citations = []
+    for source_id in generated.source_ids:
+        source = sources_by_id.get(source_id)
+
+        if source is None:
+            raise HTTPException(
+                status_code=502,
+                detail=f"The answer model returned an unknown source ID: {source_id}",
+            )
+
+        citations.append(
+            Citation(
+                file_name=source["file_name"],
+                page_number=source["page_number"],
+                quote=source["text"],
+            )
+        )
+
+    return AskResponse(answer=generated.answer, citations=citations)
