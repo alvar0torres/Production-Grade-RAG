@@ -1,11 +1,6 @@
-from io import BytesIO
-from pathlib import Path
-
 from fastapi import FastAPI, File, HTTPException, UploadFile
-from pypdf import PdfReader
-from pypdf.errors import PdfReadError
 
-from app.chunking import chunk_text
+from app.document_processing import extract_pdf_data
 from app.embeddings import create_embeddings
 from app.generation import generate_answer
 from app.vector_store import search_chunks, store_chunks
@@ -39,45 +34,10 @@ async def create_embedding_endpoint(request: EmbeddingRequest):
 
 @app.post("/documents/extract")
 async def extract_pdf(file: UploadFile = File(...)):
-    if not file.filename or Path(file.filename).suffix.lower() != ".pdf":
-        raise HTTPException(status_code=400, detail="Please upload a PDF file.")
-
-    contents = await file.read()
-
-    try:
-        reader = PdfReader(BytesIO(contents))
-    except PdfReadError as error:
-        raise HTTPException(
-            status_code=400, detail="The uploaded file could not be read as a PDF."
-        ) from error
-
-    if reader.is_encrypted:
-        raise HTTPException(
-            status_code=400, detail="Encrypted PDFs are not supported yet."
-        )
-
-    pages = []
-
-    for page_number, page in enumerate(reader.pages, start=1):
-        text = page.extract_text() or ""
-        chunks = chunk_text(text)
-
-        pages.append(
-            {
-                "page_number": page_number,
-                "text": text,
-                "chunks": [
-                    {
-                        "chunk_index": chunk_index,
-                        "text": chunk,
-                    }
-                    for chunk_index, chunk in enumerate(chunks, start=1)
-                ],
-            }
-        )
+    filename, pages = await extract_pdf_data(file)
 
     return {
-        "filename": file.filename,
+        "filename": filename,
         "page_count": len(pages),
         "chunk_count": sum(len(page["chunks"]) for page in pages),
         "pages": pages,
@@ -151,3 +111,43 @@ async def ask(request: AskRequest):
         )
 
     return AskResponse(answer=generated.answer, citations=citations)
+
+
+@app.post("/documents/ingest")
+async def ingest_pdf(file: UploadFile = File(...)):
+    filename, pages = await extract_pdf_data(file)
+
+    # Add source details to every chunk before storing it.
+    chunks: list[dict[str, str | int]] = []
+    for page in pages:
+        for chunk in page["chunks"]:
+            chunks.append(
+                {
+                    "text": chunk["text"],
+                    "file_name": filename,
+                    "page_number": page["page_number"],
+                    "chunk_index": chunk["chunk_index"],
+                }
+            )
+
+    if not chunks:
+        raise HTTPException(
+            status_code=400,
+            detail="No text could be extracted from this PDF.",
+        )
+
+    # Send chunks in batches of at most 100 to the embedding API.
+    embeddings: list[list[float]] = []
+    for batch_start in range(0, len(chunks), 100):
+        batch = chunks[batch_start : batch_start + 100]
+        batch_embeddings = await create_embeddings([chunk["text"] for chunk in batch])
+        embeddings.extend(batch_embeddings)
+
+    store_chunks(chunks, embeddings)
+
+    return {
+        "filename": filename,
+        "page_count": len(pages),
+        "chunk_count": len(chunks),
+        "indexed_count": len(chunks),
+    }
