@@ -49,3 +49,19 @@ def search_chunks(
     )
 
     return response.points
+
+
+def delete_document_chunks(file_name: str) -> None:
+    client.delete(
+        collection_name=COLLECTION_NAME,
+        points_selector=models.FilterSelector(
+            filter=models.Filter(
+                must=[
+                    models.FieldCondition(
+                        key="file_name",
+                        match=models.MatchValue(value=file_name),
+                    )
+                ]
+            )
+        ),
+    )
