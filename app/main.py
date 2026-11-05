@@ -152,3 +152,9 @@ async def ingest_pdf(file: UploadFile = File(...)):
         "chunk_count": len(chunks),
         "indexed_count": len(chunks),
     }
+
+
+@app.delete("/documents/delete")
+async def delete_document(filename: str):
+    delete_document_chunks(filename)
+    return {"message": f"Document deleted: {filename}"}
