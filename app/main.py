@@ -3,7 +3,7 @@ from fastapi import FastAPI, File, HTTPException, UploadFile
 from app.document_processing import extract_pdf_data
 from app.embeddings import create_embeddings
 from app.generation import generate_answer
-from app.vector_store import search_chunks, store_chunks
+from app.vector_store import search_chunks, store_chunks, delete_document_chunks
 from app.schemas import (
     AskRequest,
     AskResponse,
@@ -143,6 +143,7 @@ async def ingest_pdf(file: UploadFile = File(...)):
         batch_embeddings = await create_embeddings([chunk["text"] for chunk in batch])
         embeddings.extend(batch_embeddings)
 
+    delete_document_chunks(filename)
     store_chunks(chunks, embeddings)
 
     return {
