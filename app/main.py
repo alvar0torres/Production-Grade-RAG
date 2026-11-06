@@ -85,6 +85,12 @@ async def ask(request: AskRequest):
 
     sources = [result.payload for result in results if result.payload is not None]
 
+    if not sources:
+        return AskResponse(
+            answer="I could not find an answer in the provided sources.",
+            citations=[],
+        )
+
     generated = await generate_answer(request.question, sources)
 
     # Map the model's source IDs back to retrieved chunks.
